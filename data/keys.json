@@ -5,5 +5,13 @@
     "scriptId": "NBTF_ACTIVE",
     "expiresAt": "2099-01-01T00:00:00.000Z",
     "disabled": false
+  },
+  {
+    "name": "demo key for local tests",
+    "keyHash": "53072f1b30674ae3cbf44197c9089df25fcae75435266d899c5a98b1085e6b0b",
+    "scriptId": "NBTF_ACTIVE",
+    "expiresAt": "2099-01-01T00:00:00.000Z",
+    "disabled": false,
+    "source": "local"
   }
 ]
