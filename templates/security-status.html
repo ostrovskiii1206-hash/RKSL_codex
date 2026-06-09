@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RKSL Security Status</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at top, #0f172a 0%, #030712 100%); color: #f3f4f6; font-family: Inter, system-ui, sans-serif; }
+    main { width: min(760px, calc(100% - 32px)); background: #0b0f19; border: 1px solid #1f2937; border-radius: 24px; padding: 32px; box-shadow: 0 25px 50px -12px rgba(0,0,0,.5); }
+    h1 { margin-top: 0; }
+    li { margin: 10px 0; color: #cbd5e1; }
+    code { background: #111827; border: 1px solid #1f2937; padding: 3px 6px; border-radius: 7px; color: #93c5fd; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>RKSL Security Status</h1>
+    <ul>
+      <li>Cloudflare Worker gateway: <code>{{workerMode}}</code></li>
+      <li>Backend storage: <code>{{storageMode}}</code></li>
+      <li>Strict Worker signature checks: <code>{{signatureMode}}</code></li>
+      <li>Emergency mode is managed from the private admin panel.</li>
+    </ul>
+  </main>
+</body>
+</html>

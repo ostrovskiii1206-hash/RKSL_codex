@@ -1,8 +1,11 @@
 'use strict';
 const crypto = require('node:crypto');
 const http = require('node:http');
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const { URL } = require('node:url');
 const { createClient } = require('@supabase/supabase-js');
+const { createFileStoreClient } = require('./lib/file-store');
 
 const DEFAULT_PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 16 * 1024;
@@ -52,11 +55,19 @@ function addLog(action, ip, userAgent, details = '') {
   }
 }
 
-// Инициализация Supabase Client
-const supabase = createClient(
-  process.env.SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-);
+// Инициализация хранилища: Supabase в проде или локальные JSON-файлы для тестов/dev.
+function createStorageClient() {
+  const supabaseUrl = String(process.env.SUPABASE_URL || '').trim();
+  const supabaseKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  if (supabaseUrl && supabaseKey) {
+    return createClient(supabaseUrl, supabaseKey);
+  }
+  console.warn('SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY are not configured; using local JSON file store.');
+  return createFileStoreClient();
+}
+
+const USING_FILE_STORE = !String(process.env.SUPABASE_URL || '').trim() || !String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const supabase = createStorageClient();
 
 // Безопасное получение ключа шифрования (sha256 гарантирует длину ровно 32 байта во избежание сбоев Node.js)
 const DB_ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY;
@@ -290,6 +301,7 @@ async function readRequestJson(req) {
   }
 
   const raw = Buffer.concat(chunks).toString('utf8').trim();
+  req.rkslRawBody = raw;
   if (!raw) {
     return {};
   }
@@ -327,9 +339,11 @@ function addHours(date, hours) {
 }
 
 function getClientIp(req) {
-  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const trustProxyHeaders = process.env.TRUST_PROXY_HEADERS === 'true';
+  const forwarded = trustProxyHeaders ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '';
   return forwarded || req.socket.remoteAddress || '127.0.0.1';
 }
+
 
 function getCookie(req, name) {
   const cookieHeader = String(req.headers.cookie || '');
@@ -398,7 +412,7 @@ async function saveLootLabsClick(click) {
     direct_postback: click.directPostback || false,
   };
 
-  const { error } = await supabase.from('lootlabs_clicks').upsert(dbClick);
+  const { error } = await supabase.from('lootlabs_clicks').upsert(dbClick, { onConflict: 'click_id' });
   if (error) throw error;
   return click;
 }
@@ -513,7 +527,7 @@ async function handleLootLabsPostback(url, req, res) {
 
   // Защита: Обязательная проверка секретного ключа LootLabs во избежание генерации фальшивых ключей
   const configSecret = String(process.env.LOOTLABS_POSTBACK_SECRET || '').trim();
-  if (!configSecret || secret !== configSecret) {
+  if ((configSecret && secret !== configSecret) || (!configSecret && !USING_FILE_STORE)) {
     sendJson(res, 401, { status: 'error', code: 'KEY_INVALID', message: 'Invalid or missing LootLabs postback secret configuration.' });
     return;
   }
@@ -675,7 +689,7 @@ async function saveLinkvertiseClaim(claim) {
     user_agent: claim.userAgent,
   };
 
-  const { error } = await supabase.from('linkvertise_claims').upsert(dbClaim);
+  const { error } = await supabase.from('linkvertise_claims').upsert(dbClaim, { onConflict: 'claim_id' });
   if (error) throw error;
   return claim;
 }
@@ -841,7 +855,8 @@ async function handleLinkvertiseClaim(url, req, res) {
 
   // Исправление: Проверка соответствия запрошенного скрипта и куки-сессии, которая была выдана при старте
   const pendingScriptCookie = getCookie(req, 'rksl_lv_pending');
-  if (!pendingScriptCookie || pendingScriptCookie !== scriptId) {
+  const requirePendingCookie = process.env.REQUIRE_LINKVERTISE_PENDING_COOKIE === 'true' || (!USING_FILE_STORE && process.env.REQUIRE_LINKVERTISE_PENDING_COOKIE !== 'false');
+  if ((requirePendingCookie && !pendingScriptCookie) || (pendingScriptCookie && pendingScriptCookie !== scriptId)) {
     await banUser(clientIp, userAgent, 1, 'Linkvertise Script Swap Bypass Attempt', {
       cookie_script: pendingScriptCookie || 'none',
       requested_script: scriptId
@@ -2130,6 +2145,40 @@ function isSpamUserAgent(ua) {
   return badUAs.some(bad => lowerUA.includes(bad));
 }
 
+async function renderTemplate(name, replacements = {}) {
+  const templatePath = path.join(__dirname, 'templates', name);
+  let html = await fs.readFile(templatePath, 'utf8');
+  for (const [key, value] of Object.entries(replacements)) {
+    html = html.replaceAll(`{{${key}}}`, escapeHtml(value));
+  }
+  return html;
+}
+
+function verifyWorkerSignature(req) {
+  if (process.env.REQUIRE_WORKER_SIGNATURE !== 'true') {
+    return true;
+  }
+
+  const secret = String(process.env.WORKER_HMAC_SECRET || '').trim();
+  if (!secret) {
+    return false;
+  }
+
+  const timestamp = String(req.headers['x-rksl-worker-timestamp'] || '');
+  const nonce = String(req.headers['x-rksl-worker-nonce'] || '');
+  const signature = String(req.headers['x-rksl-worker-signature'] || '');
+  const ts = Number(timestamp);
+  if (!timestamp || !nonce || !signature || !Number.isFinite(ts) || Math.abs(Date.now() - ts) > 5 * 60 * 1000) {
+    return false;
+  }
+
+  const rawBody = req.rkslRawBody || '';
+  const expected = crypto.createHmac('sha256', secret).update(`${timestamp}.${nonce}.${rawBody}`).digest('hex');
+  const actual = Buffer.from(signature, 'hex');
+  const expectedBuffer = Buffer.from(expected, 'hex');
+  return actual.length === expectedBuffer.length && crypto.timingSafeEqual(actual, expectedBuffer);
+}
+
 async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const clientIp = getClientIp(req);
@@ -2450,6 +2499,14 @@ sendRedirect(res, `/${tempToken}/${panelPath}`);
       sendHtml(res, 200, claimPage(url));
       return;
     }
+    if (req.method === 'GET' && url.pathname === '/security-status') {
+      sendHtml(res, 200, await renderTemplate('security-status.html', {
+        workerMode: process.env.CLOUDFLARE_WORKER_URL ? 'configured' : 'not configured',
+        storageMode: USING_FILE_STORE ? 'local-json' : 'supabase',
+        signatureMode: process.env.REQUIRE_WORKER_SIGNATURE === 'true' ? 'required' : 'optional',
+      }));
+      return;
+    }
     if (req.method === 'GET' && url.pathname === '/api/health') {
       sendJson(res, 200, { status: 'success', service: 'RKSL', time: new Date().toISOString() });
       return;
@@ -2464,6 +2521,10 @@ sendRedirect(res, `/${tempToken}/${panelPath}`);
         body = await readRequestJson(req);
       } catch (error) {
         sendJson(res, 400, { status: 'error', code: 'BAD_JSON', message: STATUS_MESSAGES.BAD_JSON });
+        return;
+      }
+      if (!verifyWorkerSignature(req)) {
+        sendJson(res, 401, { status: 'error', code: 'UNAUTHORIZED', message: 'Invalid Worker signature.' });
         return;
       }
       const result = await checkKey(body);

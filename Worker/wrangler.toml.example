@@ -1,0 +1,10 @@
+name = "rksl-gateway"
+main = "worker.js"
+compatibility_date = "2026-06-09"
+
+[vars]
+# Comma-separated Railway backends. Example:
+# RKSL_BACKENDS = "https://server1.up.railway.app,https://server2.up.railway.app,https://server3.up.railway.app"
+RKSL_BACKENDS = ""
+RKSL_SERVERS_CACHE_TTL_MS = "60000"
+# Set this secret with: wrangler secret put WORKER_HMAC_SECRET
