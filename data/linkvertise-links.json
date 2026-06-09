@@ -1,0 +1,8 @@
+{
+  "NBTF_ACTIVE": {
+    "scriptId": "NBTF_ACTIVE",
+    "linkvertiseUrl": "https://link-hub.net/6310451/W8TcShdFOC3G",
+    "enabled": true,
+    "note": "Set the Linkvertise target/final URL to https://rkslservermain01-production-85a7.up.railway.app/linkvertise-claim?script=NBTF_ACTIVE and set LINKVERTISE_ANTI_BYPASS_TOKEN in Railway env."
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "rksl-key-system-server",
+  "version": "1.0.0",
+  "description": "Railway-ready RKSL key system API and Work.ink key giver pages.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.8",
+    "dotenv": "^17.4.2",
+    "ws": "^8.21.0"
+  }
+}
